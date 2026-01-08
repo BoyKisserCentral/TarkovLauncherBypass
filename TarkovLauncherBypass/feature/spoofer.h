@@ -5,8 +5,10 @@
 /// 
 
 #pragma once
+#include <strsafe.h>
 
 namespace spoofer
 {
     void init();
+    void game(DWORD eft_pid);
 };

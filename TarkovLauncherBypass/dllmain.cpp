@@ -25,7 +25,8 @@ void init()
 
     if (eft_pid != 0)
     {
-        Sleep(1000);
+        // do spoofing for game
+        spoofer::game(eft_pid);
         // inject dll
         injector::inject(eft_pid);
     }

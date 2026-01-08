@@ -1,5 +1,5 @@
 ﻿//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// Spoofer is a cleaned up version of HWho by hollow
+/// Launcher spoofer is a cleaned up version of HWho by hollow
 /// https://www.unknowncheats.me/forum/escape-from-tarkov/494040-hwho-slightly-fun-bsg-launcher-hwid-check-bypass.html
 /// Credit goes to all original contributors.
 /// 
@@ -13,8 +13,8 @@
 #include <vector>
 #include <windows.h>
 #include <wbemcli.h>
-#include <ctime>
 #include <sstream>
+#include <TlHelp32.h>
 
 #include "../libs/detours.h"
 #include "../util/globals.h"
@@ -298,17 +298,16 @@ HRESULT __stdcall hkGetFn(IWbemClassObject* pThis, LPCWSTR wszName, LONG lFlags,
     return original_result;
 }
 
-static int int_rand(const int& min, const int& max)
-{
-    static std::mt19937* generator = nullptr;
-    if (!generator) generator = new std::mt19937(clock());
-    std::uniform_int_distribution<int> distribution(min, max);
-    return distribution(*generator);
-}
-
 namespace spoofer
 {
+    static bool should_spoof = false;
+
     const std::string HWID_FILE = "hwid.bin";
+    const std::string GAMEASSEMBLY = "GameAssembly.dll";
+    // search HWEcho_Json -> xref the function its in, sig the function call above that which is the check
+    const std::string NEEDS_HWID_CHECK_SIG =
+        "E8 ? ? ? ? 48 85 C0 0F 84 ? ? ? ? 33 D2 48 8D 4C 24 ? E8 ? ? ? ? ? ? ? 0F 11 44 24";
+    constexpr size_t HWID_FUNCTION_PATCH_SIZE = 5;
 
     void init()
     {
@@ -328,6 +327,7 @@ namespace spoofer
             return;
         }
         logger::info("Spoofer Enabled");
+        should_spoof = true;
         config_file.close();
 
         std::basic_ifstream<unsigned char> file(HWID_FILE, std::ios::binary);
@@ -347,7 +347,7 @@ namespace spoofer
             std::stringstream ss;
             for (size_t i = 0; i < 12; i++)
             {
-                key.emplace_back(int_rand(0, 0xFF));
+                key.emplace_back(globals::int_rand(0, 0xFF));
                 ss << std::hex << (key[i] & 0xFF);
             }
             logger::info("Key: " + ss.str());
@@ -396,6 +396,92 @@ namespace spoofer
         {
             logger::error("Failed to hook firmware function!");
             exit(0); // NOLINT(concurrency-mt-unsafe)
+        }
+    }
+
+    void game(DWORD eft_pid)
+    {
+        if (!should_spoof) return;
+        logger::info("Patching HWID Check");
+        HANDLE eft = OpenProcess(
+            PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_VM_WRITE |
+            PROCESS_VM_OPERATION, false, eft_pid);
+        if (eft != nullptr)
+        {
+            // find GameAssembly.dll
+            // find module and remove ldr entry
+            HMODULE found_module = nullptr;
+            size_t found_module_size = 0;
+            while (!found_module)
+            {
+                HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, eft_pid);
+                if (snapshot != INVALID_HANDLE_VALUE)
+                {
+                    MODULEENTRY32W me32;
+                    me32.dwSize = sizeof(MODULEENTRY32W);
+
+                    if (Module32FirstW(snapshot, &me32))
+                    {
+                        do
+                        {
+                            if (std::wstring(me32.szModule) == std::wstring(GAMEASSEMBLY.begin(), GAMEASSEMBLY.end()))
+                            {
+                                found_module = reinterpret_cast<HMODULE>(me32.modBaseAddr);
+                                found_module_size = me32.modBaseSize;
+                                break;
+                            }
+                        }
+                        while (Module32NextW(snapshot, &me32));
+                    }
+                    CloseHandle(snapshot);
+                    Sleep(100);
+                }
+            }
+            logger::info("GameAssembly Loaded");
+
+            auto dumped_gameassembly = static_cast<char*>(malloc(found_module_size));
+            if (!ReadProcessMemory(eft, found_module, dumped_gameassembly, found_module_size, nullptr))
+            {
+                free(dumped_gameassembly);
+                CloseHandle(found_module);
+                CloseHandle(eft);
+                logger::error("Failed to dump GameAssembly");
+                exit(0); // NOLINT(concurrency-mt-unsafe)
+            }
+
+            UINT64 http_function_offset = globals::find_pattern(NEEDS_HWID_CHECK_SIG, dumped_gameassembly,
+                                                                found_module_size);
+            if (http_function_offset)
+            {
+                logger::info("HWID Function Found");
+                auto address = reinterpret_cast<PVOID>(reinterpret_cast<UINT64>(found_module) + // NOLINT(performance-no-int-to-ptr)
+                    http_function_offset);
+
+                // replace check function call by setting rax to 0 so we never check hwid
+                byte shellcode[HWID_FUNCTION_PATCH_SIZE] = {
+                    0x48, 0x31, 0xC0, // xor rax, rax
+                    0x90, // nop
+                    0x90 // nop 
+                };
+
+                if (!WriteProcessMemory(eft, address, shellcode, HWID_FUNCTION_PATCH_SIZE, nullptr))
+                {
+                    logger::error("HWID Function Patch Failed");
+                    CloseHandle(eft);
+                    exit(0); // NOLINT(concurrency-mt-unsafe)
+                }
+            }
+            else
+            {
+                logger::error("HWID Function Not Found");
+                CloseHandle(eft);
+                exit(0); // NOLINT(concurrency-mt-unsafe)
+            }
+            free(dumped_gameassembly);
+            CloseHandle(found_module);
+
+            CloseHandle(eft);
+            logger::info("HWID Resolution Patched");
         }
     }
 }
