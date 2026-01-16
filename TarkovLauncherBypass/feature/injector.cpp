@@ -188,13 +188,25 @@ bool remove_module_lrd_entry(HANDLE hProcess, HMODULE hModule)
 
 namespace injector
 {
-    std::string dllIn;
+    bool should_inject = false;
+    auto dlls = std::vector<std::string>();
+
+    bool should_inject_res()
+    {
+        return should_inject;
+    }
+
+    std::vector<std::string> dlls_res()
+    {
+        return dlls;
+    }
 
     void init()
     {
         std::ifstream file(globals::DLL_CONFIG_FILE);
         if (file)
         {
+            std::string dllIn;
             std::string enabled_string;
             for (int i = 0; i < 2; ++i)
             {
@@ -205,8 +217,15 @@ namespace injector
                 std::getline(file, enabled_string);
             }
             dllIn = dllIn.substr(7);
+            std::istringstream f(dllIn);
+            std::string s;
+            while (getline(f, s, ';'))
+            {
+                dlls.push_back(s);
+            }
+
             enabled_string = enabled_string.substr(7);
-            if (enabled_string != "true") return;
+            if (enabled_string == "true") should_inject = true;
         }
         else
         {
@@ -216,7 +235,7 @@ namespace injector
         file.close();
     }
 
-    void inject(DWORD eft_pid)
+    void inject(DWORD eft_pid, std::string dllIn)
     {
         logger::info("Injecting: " + dllIn);
         WCHAR path[MAX_PATH];

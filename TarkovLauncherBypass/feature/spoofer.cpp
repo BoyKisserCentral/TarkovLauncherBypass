@@ -409,7 +409,6 @@ namespace spoofer
         if (eft != nullptr)
         {
             // find GameAssembly.dll
-            // find module and remove ldr entry
             HMODULE found_module = nullptr;
             size_t found_module_size = 0;
             while (!found_module)

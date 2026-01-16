@@ -25,10 +25,16 @@ void init()
 
     if (eft_pid != 0)
     {
+        // inject dlls
+        if (injector::should_inject_res())
+        {
+            for (auto dll : injector::dlls_res())
+            {
+                injector::inject(eft_pid, dll);
+            }
+        }
         // do spoofing for game
         spoofer::game(eft_pid);
-        // inject dll
-        injector::inject(eft_pid);
     }
 
     logger::info("Exiting");
@@ -59,6 +65,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         }
         detatch();
         break;
+    default: ;
     }
 
     return TRUE;

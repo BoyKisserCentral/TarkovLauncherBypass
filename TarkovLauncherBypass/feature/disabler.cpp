@@ -22,7 +22,7 @@
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "ntdll.lib")
 
-static bool patch_completed = false;
+static bool eft_started = false;
 static DWORD eft_pid = false;
 
 void patch_bytes(const HANDLE hProcess, void* address, const std::vector<std::uint8_t>& data)
@@ -35,7 +35,7 @@ void patch_bytes(const HANDLE hProcess, void* address, const std::vector<std::ui
     VirtualProtectEx(hProcess, address, size, dwOldProtect, &dwOldProtect);
 }
 
-HMODULE find_module(const HANDLE hProcess, const char* name)
+static HMODULE find_module(const HANDLE hProcess, const char* name)
 {
     HMODULE hMods[1024];
     DWORD cbNeeded;
@@ -123,6 +123,9 @@ BOOL WINAPI hkCreateProcessInternalW(
         HANDLE hProcess = pi.hProcess;
         HANDLE hThread = pi.hThread;
 
+        eft_pid = GetProcessId(hProcess);
+        eft_started = true;
+
         PROCESS_BASIC_INFORMATION pbi;
         if (!NT_SUCCESS(NtQueryInformationProcess(
             hProcess, ProcessBasicInformation, &pbi, sizeof(pbi), nullptr
@@ -162,7 +165,7 @@ BOOL WINAPI hkCreateProcessInternalW(
 
         std::vector<uint8_t> buf(2);
         ReadProcessMemory(hProcess, reinterpret_cast<LPVOID>(entry), buf.data(), 2, nullptr); // NOLINT(performance-no-int-to-ptr, performance-no-int-to-ptr)
-        patch_bytes(hProcess, reinterpret_cast<LPVOID>(entry), {0xEB, 0xFE});
+        patch_bytes(hProcess, reinterpret_cast<LPVOID>(entry), {0xEB, 0xFE}); // NOLINT(performance-no-int-to-ptr)
         ResumeThread(hThread);
 
         CONTEXT context;
@@ -182,28 +185,52 @@ BOOL WINAPI hkCreateProcessInternalW(
         SuspendThread(hThread);
 
         HMODULE hUnityPlayer = find_module(hProcess, "UnityPlayer");
+        MODULEINFO unityInfo = {};
+        GetModuleInformation(hProcess, hUnityPlayer, &unityInfo, sizeof(MODULEINFO));
+        auto unityModule = new char[unityInfo.SizeOfImage];
+        ReadProcessMemory(hProcess, unityInfo.lpBaseOfDll, unityModule, unityInfo.SizeOfImage, nullptr);
+        std::string checkBeServicePattern = "48 89 5C 24 ? 48 89 6C 24 ? 56 57 41 56 48 83 EC ? 33 C0 0F 57 C0";
+        UINT64 checkBeServiceOffset = globals::find_pattern(checkBeServicePattern, unityModule, unityInfo.SizeOfImage);
+        if (checkBeServiceOffset == 0)
+        {
+            logger::error("Disabler Failed: Check BE Service Function Missing");
+            Sleep(1000);
+            exit(0); // NOLINT(concurrency-mt-unsafe)
+        }
         auto* beCheckFunc =
-            reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(hUnityPlayer) + 0x491E60); // NOLINT(performance-no-int-to-ptr)
+            reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(hUnityPlayer) + checkBeServiceOffset); // NOLINT(performance-no-int-to-ptr)
+        delete[] unityModule;
+
         // B0 01 mov al, 1
         // C3    ret
         patch_bytes(hProcess, beCheckFunc, {0xB0, 0x01, 0xC3});
 
-        patch_bytes(hProcess, reinterpret_cast<LPVOID>(entry), buf);
+        patch_bytes(hProcess, reinterpret_cast<LPVOID>(entry), buf); // NOLINT(performance-no-int-to-ptr)
 
         ResumeThread(hThread);
 
         HMODULE hGameAssembly;
-        while (!(hGameAssembly = find_module(hProcess, "GameAssembly")))
+        while (!((hGameAssembly = find_module(hProcess, "GameAssembly"))))
         {
             Sleep(10);
         }
 
+        MODULEINFO gameInfo = {};
+        GetModuleInformation(hProcess, hGameAssembly, &gameInfo, sizeof(MODULEINFO));
+        auto gameModule = new char[gameInfo.SizeOfImage];
+        ReadProcessMemory(hProcess, gameInfo.lpBaseOfDll, gameModule, gameInfo.SizeOfImage, nullptr);
+        std::string loadBeClientPattern =
+            "48 89 4C 24 ? 53 56 57 41 54 41 55 41 56 41 57 48 81 EC ? ? ? ? 48 8B D9 80 3D ? ? ? ? 00 0F 85 ? ? ? ? 48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8D 0D ? ? ? ? E8 ? ? ? ? C6 05";
+        UINT64 loadBeClientOffset = globals::find_pattern(loadBeClientPattern, gameModule, gameInfo.SizeOfImage);
+        if (loadBeClientOffset == 0)
+        {
+            logger::error("Disabler Failed: Load BE Client Function Missing");
+            exit(0); // NOLINT(concurrency-mt-unsafe)
+        }
         auto* loadBEClient =
-            reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(hGameAssembly) + 0x37E89B0); // NOLINT(performance-no-int-to-ptr)
+            reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(hGameAssembly) + loadBeClientOffset); // NOLINT(performance-no-int-to-pt
+        delete[] gameModule;
         patch_bytes(hProcess, loadBEClient, {0xC3}); // C3 ret
-
-        eft_pid = GetProcessId(hProcess);
-        patch_completed = true;
 
         return ret;
     }
@@ -262,7 +289,7 @@ namespace disabler
         }
 
 
-        while (!patch_completed)
+        while (!eft_started)
         {
             Sleep(100);
         }
