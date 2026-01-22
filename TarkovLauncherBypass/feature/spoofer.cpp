@@ -367,6 +367,7 @@ namespace spoofer
         if (getFn == nullptr)
         {
             logger::error("Failed to find get function!");
+            Sleep(2000);
             exit(0); // NOLINT(concurrency-mt-unsafe)
         }
 
@@ -375,6 +376,7 @@ namespace spoofer
         if (getSystemFirmwareTable == nullptr)
         {
             logger::error("Failed to find firmware function!");
+            Sleep(2000);
             exit(0); // NOLINT(concurrency-mt-unsafe)
         }
 
@@ -385,6 +387,7 @@ namespace spoofer
         if (DetourTransactionCommit() != NO_ERROR)
         {
             logger::error("Failed to hook get function!");
+            Sleep(2000);
             exit(0); // NOLINT(concurrency-mt-unsafe)
         }
 
@@ -395,6 +398,7 @@ namespace spoofer
         if (DetourTransactionCommit() != NO_ERROR)
         {
             logger::error("Failed to hook firmware function!");
+            Sleep(2000);
             exit(0); // NOLINT(concurrency-mt-unsafe)
         }
     }
@@ -404,8 +408,7 @@ namespace spoofer
         if (!should_spoof) return;
         logger::info("Patching HWID Check");
         HANDLE eft = OpenProcess(
-            PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_VM_WRITE |
-            PROCESS_VM_OPERATION, false, eft_pid);
+            PROCESS_ALL_ACCESS, false, eft_pid);
         if (eft != nullptr)
         {
             // find GameAssembly.dll
@@ -443,8 +446,10 @@ namespace spoofer
             {
                 free(dumped_gameassembly);
                 CloseHandle(found_module);
+                TerminateProcess(eft, 0);
                 CloseHandle(eft);
                 logger::error("Failed to dump GameAssembly");
+                Sleep(2000);
                 exit(0); // NOLINT(concurrency-mt-unsafe)
             }
 
@@ -466,14 +471,18 @@ namespace spoofer
                 if (!WriteProcessMemory(eft, address, shellcode, HWID_FUNCTION_PATCH_SIZE, nullptr))
                 {
                     logger::error("HWID Function Patch Failed");
+                    TerminateProcess(eft, 0);
                     CloseHandle(eft);
+                    Sleep(2000);
                     exit(0); // NOLINT(concurrency-mt-unsafe)
                 }
             }
             else
             {
                 logger::error("HWID Function Not Found");
+                TerminateProcess(eft, 0);
                 CloseHandle(eft);
+                Sleep(2000);
                 exit(0); // NOLINT(concurrency-mt-unsafe)
             }
             free(dumped_gameassembly);

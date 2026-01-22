@@ -38,6 +38,7 @@ void init()
     }
 
     logger::info("Exiting");
+    Sleep(10000);
     exit(0); // NOLINT(concurrency-mt-unsafe)
 }
 

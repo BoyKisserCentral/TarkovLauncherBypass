@@ -246,8 +246,7 @@ namespace injector
         std::string dllInFull = std::string(wpath.begin(), wpath.end()).append(dllIn);
         auto dll = const_cast<char*>(dllInFull.c_str());
         HANDLE eft = OpenProcess(
-            PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_VM_WRITE |
-            PROCESS_VM_OPERATION, false, eft_pid);
+            PROCESS_ALL_ACCESS, false, eft_pid);
         if (eft != nullptr)
         {
             auto fnLoadLibrary = reinterpret_cast<LPVOID>(GetProcAddress(

@@ -194,7 +194,8 @@ BOOL WINAPI hkCreateProcessInternalW(
         if (checkBeServiceOffset == 0)
         {
             logger::error("Disabler Failed: Check BE Service Function Missing");
-            Sleep(1000);
+            TerminateProcess(hProcess, 0);
+            Sleep(2000);
             exit(0); // NOLINT(concurrency-mt-unsafe)
         }
         auto* beCheckFunc =
@@ -225,6 +226,8 @@ BOOL WINAPI hkCreateProcessInternalW(
         if (loadBeClientOffset == 0)
         {
             logger::error("Disabler Failed: Load BE Client Function Missing");
+            TerminateProcess(hProcess, 0);
+            Sleep(2000);
             exit(0); // NOLINT(concurrency-mt-unsafe)
         }
         auto* loadBEClient =
