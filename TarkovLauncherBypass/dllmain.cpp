@@ -25,6 +25,7 @@ void init()
 
     if (eft_pid != 0)
     {
+        Sleep(100);
         // inject dlls
         if (injector::should_inject_res())
         {
